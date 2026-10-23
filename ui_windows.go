@@ -124,7 +124,19 @@ func runMain() {
 		Size:     Size{Width: 900, Height: 620},
 		MinSize:  Size{Width: 640, Height: 460},
 		Layout:   VBox{},
+		OnDropFiles: func(files []string) {
+			u.startFromFiles("", files)
+		},
 		Children: []Widget{
+			Composite{
+				Layout: HBox{MarginsZero: true},
+				Children: []Widget{
+					PushButton{Text: "Copy or move files…", OnClicked: func() { u.pickFiles("") }},
+					PushButton{Text: "Delete files…", OnClicked: func() { u.pickFiles("delete") }},
+					Label{Text: "  or drag files and folders onto this window", TextColor: walk.RGB(90, 90, 90)},
+					HSpacer{},
+				},
+			},
 			Label{AssignTo: &u.header, Text: "Nothing to do yet", Font: Font{PointSize: 12, Bold: true}},
 			Label{AssignTo: &u.current, Text: " ", EllipsisMode: EllipsisPath},
 			ProgressBar{AssignTo: &u.bar, MaxValue: 1000},
@@ -238,6 +250,7 @@ func runMain() {
 		}
 	})
 
+	u.autoInstall()
 	u.updateMenuButton()
 	u.pollInbox()
 	go func() {
@@ -322,8 +335,8 @@ func (u *ui) refresh() {
 
 	j := u.activeJob()
 	if j == nil {
-		u.header.SetText("Nothing to do yet")
-		u.current.SetText("Right-click files → Show more options → TransferThis, or copy files and use \"TransferThis: Paste here\".")
+		u.header.SetText("Drag files or folders onto this window to copy or move them")
+		u.current.SetText("Or in File Explorer: right-click files → Show more options → \"TransferThis: Copy to…\", or copy them (Ctrl+C) and right-click a folder → \"TransferThis: Paste here\".")
 		u.stats.SetText(" ")
 		u.bar.SetValue(0)
 		u.mw.SetTitle("TransferThis")
@@ -505,6 +518,54 @@ func (u *ui) toggleMenu() {
 		walk.MsgBox(u.mw, "TransferThis", err.Error(), walk.MsgBoxIconError)
 	}
 	u.updateMenuButton()
+}
+
+// startFromFiles asks where to send the files (and copy or move when op is "") and queues the task.
+func (u *ui) startFromFiles(op string, files []string) {
+	if len(files) == 0 {
+		return
+	}
+	jf, ok := askForJob(u.mw, op, files)
+	if !ok {
+		return
+	}
+	u.eng.Submit(engine.NewJob(jf.Op, jf.Sources, jf.Dest,
+		engine.Options{Conflict: jf.Conflict, Verify: jf.Verify, Recycle: jf.Recycle}))
+	u.jobsTV.SetCurrentIndex(-1)
+	u.refresh()
+}
+
+func (u *ui) pickFiles(op string) {
+	fd := walk.FileDialog{Title: "Choose files (to include whole folders, drag them onto the window instead)"}
+	if ok, _ := fd.ShowOpenMultiple(u.mw); ok {
+		u.startFromFiles(op, fd.FilePaths)
+	}
+}
+
+// autoInstall adds the right-click entries the first time TransferThis runs, and keeps the
+// installed copy up to date when a newer TransferThis.exe is started from somewhere else.
+func (u *ui) autoInstall() {
+	self, _ := os.Executable()
+	first := !menuInstalled()
+	if !first && strings.EqualFold(filepath.Clean(self), filepath.Clean(installedExe())) {
+		return
+	}
+	if err := installMenu(); err != nil {
+		if first {
+			walk.MsgBox(u.mw, "TransferThis", "Could not add TransferThis to the right-click menu:\n\n"+err.Error(), walk.MsgBoxIconError)
+		}
+		return
+	}
+	if first {
+		walk.MsgBox(u.mw, "TransferThis",
+			"TransferThis is now in your right-click menu.\n\n"+
+				"In File Explorer, right-click files and choose \"Show more options\" to find:\n"+
+				"   • TransferThis: Copy to…\n   • TransferThis: Move to…\n   • TransferThis: Delete\n"+
+				"   • TransferThis: Paste here (after Ctrl+C or Ctrl+X)\n\n"+
+				"You can also drag files onto this window.\n"+
+				"From now on you can open TransferThis from the Start menu.",
+			walk.MsgBoxIconInformation)
+	}
 }
 
 func run(name string, args ...string) {

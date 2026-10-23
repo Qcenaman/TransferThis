@@ -39,15 +39,25 @@ func summarize(paths []string) string {
 }
 
 // askForJob shows the "Copy to / Move to / Delete" dialog for a right-click selection.
-func askForJob(op string, paths []string) (jobFile, bool) {
+// op is "copy", "move", "delete", or "" to let the user pick copy or move (drag & drop).
+func askForJob(owner walk.Form, op string, paths []string) (jobFile, bool) {
 	if op == "delete" {
-		return askDelete(paths)
+		return askDelete(owner, paths)
 	}
 	jf := jobFile{Op: engine.OpCopy, Sources: paths}
 	verb := "Copy"
 	if op == "move" {
 		jf.Op, verb = engine.OpMove, "Move"
 	}
+	chooseOp := op == ""
+	heading := fmt.Sprintf("%s %s to:", verb, plural(len(paths), "item", "items"))
+	title := "TransferThis — " + verb
+	if chooseOp {
+		heading = fmt.Sprintf("Send %s to:", plural(len(paths), "item", "items"))
+		title = "TransferThis"
+		verb = "Send"
+	}
+	var copyRB *walk.RadioButton
 	s := loadSettings()
 	recent := append([]string(nil), s.Recent...)
 
@@ -58,14 +68,14 @@ func askForJob(op string, paths []string) (jobFile, bool) {
 
 	err := Dialog{
 		AssignTo:      &dlg,
-		Title:         "TransferThis — " + verb,
+		Title:         title,
 		Icon:          appIcon(),
 		DefaultButton: &okPB,
 		CancelButton:  &cancelPB,
 		MinSize:       Size{Width: 560},
 		Layout:        VBox{},
 		Children: []Widget{
-			Label{Text: fmt.Sprintf("%s %s to:", verb, plural(len(paths), "item", "items")), Font: Font{PointSize: 10, Bold: true}},
+			Label{Text: heading, Font: Font{PointSize: 10, Bold: true}},
 			Label{Text: summarize(paths), TextColor: walk.RGB(90, 90, 90)},
 			Composite{
 				Layout: HBox{MarginsZero: true},
@@ -77,6 +87,17 @@ func askForJob(op string, paths []string) (jobFile, bool) {
 							destCB.SetText(fd.FilePath)
 						}
 					}},
+				},
+			},
+			Composite{
+				Visible: chooseOp,
+				Layout:  HBox{MarginsZero: true},
+				Children: []Widget{
+					RadioButtonGroup{Buttons: []RadioButton{
+						{AssignTo: &copyRB, Text: "Copy (keep the originals)"},
+						{Text: "Move (remove the originals after)"},
+					}},
+					HSpacer{},
 				},
 			},
 			Composite{
@@ -115,6 +136,9 @@ func askForJob(op string, paths []string) (jobFile, bool) {
 							return
 						}
 						jf.Dest = dest
+						if chooseOp && !copyRB.Checked() {
+							jf.Op = engine.OpMove
+						}
 						jf.Conflict = engine.Conflict(conflictCB.CurrentIndex())
 						jf.Verify = engine.Verify(verifyCB.CurrentIndex())
 						accepted = true
@@ -124,11 +148,12 @@ func askForJob(op string, paths []string) (jobFile, bool) {
 				},
 			},
 		},
-	}.Create(nil)
+	}.Create(owner)
 	if err != nil {
 		showError(err.Error())
 		return jf, false
 	}
+	copyRB.SetChecked(true)
 	if len(recent) > 0 {
 		destCB.SetText(recent[0])
 	}
@@ -141,7 +166,7 @@ func askForJob(op string, paths []string) (jobFile, bool) {
 	return jf, true
 }
 
-func askDelete(paths []string) (jobFile, bool) {
+func askDelete(owner walk.Form, paths []string) (jobFile, bool) {
 	jf := jobFile{Op: engine.OpDelete, Sources: paths, Recycle: true}
 	var dlg *walk.Dialog
 	var recycleRB *walk.RadioButton
@@ -181,7 +206,7 @@ func askDelete(paths []string) (jobFile, bool) {
 				},
 			},
 		},
-	}.Create(nil)
+	}.Create(owner)
 	if err != nil {
 		showError(err.Error())
 		return jf, false

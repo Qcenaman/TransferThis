@@ -33,7 +33,7 @@ func main() {
 			showError(err.Error())
 			return
 		}
-		jf, ok := askForJob(op, paths)
+		jf, ok := askForJob(nil, op, paths)
 		if !ok {
 			return
 		}
